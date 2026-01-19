@@ -1,6 +1,7 @@
 export class MujocoEngine {
     private static instance: MujocoEngine;
     private mujocoModule: any = null;
+    private static readonly CDN_BASE_URL = 'https://cdn.jsdelivr.net/gh/agustindiazcano/babylon-physics-mujoco@main/public/';
 
     private constructor() { }
 
@@ -14,27 +15,29 @@ export class MujocoEngine {
     public async init(): Promise<void> {
         if (this.mujocoModule) return;
 
-        // 1. Cargar el glue code JS
-        await this.loadScript('/mujoco_wasm.js');
+        // 1. Determinar la Base URL (Local vs CDN)
+        const baseUrl = await this.determineBaseUrl();
 
-        // 2. Obtener la función de inicialización global
+        // 2. Cargar el glue code JS usando la Base URL decidida
+        await this.loadScript(`${baseUrl}mujoco_wasm.js`);
+
+        // 3. Obtener la función de inicialización global
         const loadMujoco = (window as any).load_mujoco;
         if (!loadMujoco) {
             throw new Error('Could not find load_mujoco global. Check if mujoco_wasm.js is loaded correctly.');
         }
 
-        // 3. Instanciar WASM forzando la URL correcta
+        // 4. Instanciar WASM pasando la ubicación correcta del archivo .wasm
         this.mujocoModule = await loadMujoco({
             locateFile: (path: string) => {
-                // Siempre devolver la ruta absoluta al archivo en public
                 if (path.endsWith('.wasm')) {
-                    return '/mujoco_wasm.wasm';
+                    return `${baseUrl}mujoco_wasm.wasm`;
                 }
                 return path;
             }
         });
 
-        console.log('Mujoco WASM initialized loaded.');
+        console.log(`Mujoco WASM initialized loaded from: ${baseUrl}`);
     }
 
     public getModule(): any {
@@ -42,6 +45,21 @@ export class MujocoEngine {
             throw new Error('MujocoEngine not initialized. Call init() first.');
         }
         return this.mujocoModule;
+    }
+
+    private async determineBaseUrl(): Promise<string> {
+        try {
+            // Intentar un fetch ligero (HEAD) para verificar si existe el archivo local
+            const response = await fetch('/mujoco_wasm.wasm', { method: 'HEAD' });
+            if (response.ok) {
+                return '/'; // Usar ruta local
+            }
+        } catch (e) {
+            // Ignorar errores de red y proceder al fallback
+        }
+
+        console.warn('Mujoco local files not found. Falling back to GitHub CDN...');
+        return MujocoEngine.CDN_BASE_URL;
     }
 
     private loadScript(src: string): Promise<void> {
